@@ -309,7 +309,7 @@ body.kb #sheet{padding-bottom:16px}
 
 <script>
 'use strict';
-const APP_VERSION='2026.10.04-1';
+const APP_VERSION='2026.10.04-2';
 /* ============ helpers ============ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -333,7 +333,7 @@ const KEY='nutri.v1';
 const DEF={
   profile:{name:'',sex:'m',age:30,height:175,weight:75,activity:'1.55',goal:'mantener',deficit:20,surplus:10,configured:false,
     kcal:2500,p:150,c:300,f:68,tdee:2500,minReps:100,stepsRed:20000},
-  meals:[],fit:{},chat:[],settings:{apiKey:'',model:'claude-sonnet-5-5',theme:'auto'}
+  meals:[],fit:{},chat:[],settings:{apiKey:'',model:'claude-sonnet-5-5',theme:'light'}
 };
 function load(){
   try{const r=JSON.parse(localStorage.getItem(KEY)||'null');
@@ -355,7 +355,13 @@ function recalc(){
 }
 recalc();
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Almacenamiento lleno: exporta tus datos')}}
-function applyTheme(){const t=S.settings.theme||'auto',r=document.documentElement;if(t==='auto')delete r.dataset.theme;else r.dataset.theme=t}
+function applyTheme(){
+  if(S.settings.theme!=='light'&&S.settings.theme!=='dark'){
+    S.settings.theme=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
+    try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+  }
+  document.documentElement.dataset.theme=S.settings.theme;
+}
 applyTheme();
 
 /* ============ derived data ============ */
@@ -768,7 +774,7 @@ function openSettings(){
   const st=S.settings,P=S.profile;
   openSheet(`<h3>Ajustes</h3>
   <h4 class="sec" style="margin-top:4px">Apariencia</h4>
-  <div class="seg" id="seg-theme">${[['auto','Auto'],['light','Claro'],['dark','Oscuro']].map(([v,l])=>`<button data-v="${v}" class="${(st.theme||'auto')===v?'on':''}">${l}</button>`).join('')}</div>
+  <div class="seg" id="seg-theme">${[['light','Claro'],['dark','Oscuro']].map(([v,l])=>`<button data-v="${v}" class="${st.theme===v?'on':''}">${l}</button>`).join('')}</div>
   <h4 class="sec">Fueguitos 🔥</h4>
   <p class="help">⚡ Rayo: has hecho el mínimo del día (repeticiones de flexiones y sentadillas sumadas); no cuenta como entreno. 🔥 Fuego: entreno registrado o muchos pasos.</p>
   ${fld('profile.minReps','Repeticiones mínimas al día (flexiones + sentadillas)')}
@@ -834,7 +840,7 @@ const TOOLS=[
   {name:'update_meal',description:'Edita una comida existente por su id: nombre, tipo, calorías, macros, calidad o la fecha (para moverla de día). Solo los campos que cambian.',input_schema:{type:'object',properties:{id:{type:'string'},name:{type:'string'},meal_type:{type:'string',enum:['desayuno','comida','merienda','cena','snack']},kcal:{type:'number'},protein:{type:'number'},carbs:{type:'number'},fat:{type:'number'},quality:{type:'number'},date:{type:'string',description:'YYYY-MM-DD nueva fecha'}},required:['id']}},
   {name:'update_workout',description:'Edita un entreno existente por su id (descripción o minutos).',input_schema:{type:'object',properties:{id:{type:'string'},description:{type:'string'},minutes:{type:'number'}},required:['id']}},
   {name:'clear_day',description:'Vacía un día: borra sus comidas, su actividad (pasos, flexiones, sentadillas, entrenos) o todo.',input_schema:{type:'object',properties:{date:{type:'string',description:'YYYY-MM-DD. Por defecto hoy.'},what:{type:'string',enum:['meals','activity','all']}},required:['what']}},
-  {name:'update_profile',description:'Cambia el perfil, objetivos y ajustes del usuario. Los objetivos de kcal y macros se recalculan solos. Solo los campos que cambian.',input_schema:{type:'object',properties:{name:{type:'string'},sex:{type:'string',enum:['m','f']},age:{type:'number'},height_cm:{type:'number'},weight_kg:{type:'number'},activity_factor:{type:'number',description:'1.2 sedentario, 1.375 ligera, 1.55 moderada, 1.725 alta, 1.9 muy alta'},goal:{type:'string',enum:['perder','mantener','ganar']},deficit_pct:{type:'number',description:'5-35, % de déficit si perder'},surplus_pct:{type:'number',description:'3-25, % de superávit si ganar'},min_reps:{type:'number',description:'repeticiones mínimas al día para el ⚡'},steps_fire:{type:'number',description:'pasos para el 🔥'},theme:{type:'string',enum:['auto','light','dark']}}}},
+  {name:'update_profile',description:'Cambia el perfil, objetivos y ajustes del usuario. Los objetivos de kcal y macros se recalculan solos. Solo los campos que cambian.',input_schema:{type:'object',properties:{name:{type:'string'},sex:{type:'string',enum:['m','f']},age:{type:'number'},height_cm:{type:'number'},weight_kg:{type:'number'},activity_factor:{type:'number',description:'1.2 sedentario, 1.375 ligera, 1.55 moderada, 1.725 alta, 1.9 muy alta'},goal:{type:'string',enum:['perder','mantener','ganar']},deficit_pct:{type:'number',description:'5-35, % de déficit si perder'},surplus_pct:{type:'number',description:'3-25, % de superávit si ganar'},min_reps:{type:'number',description:'repeticiones mínimas al día para el ⚡'},steps_fire:{type:'number',description:'pasos para el 🔥'},theme:{type:'string',enum:['light','dark']}}}},
   {name:'delete_workout',description:'Elimina un entreno registrado por su id (por ejemplo si flexiones, sentadillas o pasos se registraron mal como entreno). Los ids están en el contexto.',input_schema:{type:'object',properties:{id:{type:'string'}},required:['id']}},
   {name:'delete_meal',description:'Elimina una comida registrada por su id.',input_schema:{type:'object',properties:{id:{type:'string'}},required:['id']}}
 ];
@@ -894,7 +900,7 @@ function applyUndo(list){
     else if(u.t==='fit'){if(u.prev)S.fit[u.k]=u.prev;else delete S.fit[u.k]}
     else if(u.t==='meal_edit'){const i2=S.meals.findIndex(m=>m.id===u.id);if(i2>=0)S.meals[i2]=u.prev;else S.meals.push(u.prev)}
     else if(u.t==='restore_many'){u.meals.forEach(m=>{if(!S.meals.some(x=>x.id===m.id))S.meals.push(m)})}
-    else if(u.t==='profile'){S.profile=u.prev;S.settings.theme=u.theme||'auto';applyTheme();recalc()}
+    else if(u.t==='profile'){S.profile=u.prev;S.settings.theme=u.theme||'light';applyTheme();recalc()}
   }
 }
 function runTool(name,inp,cards){
@@ -962,7 +968,7 @@ function runTool(name,inp,cards){
     Object.keys(map).forEach(x=>{if(inp[x]!=null)P[map[x]]=inp[x]});
     if(inp.activity_factor!=null)P.activity=String(inp.activity_factor);
     if(['sex','age','height_cm','weight_kg','goal','activity_factor'].some(x=>inp[x]!=null))P.configured=true;
-    if(inp.theme){S.settings.theme=inp.theme;applyTheme()}
+    if(inp.theme==='light'||inp.theme==='dark'){S.settings.theme=inp.theme;applyTheme()}
     recalc();
     cards.push({kind:'min',t:'⚙️ Perfil actualizado · '+P.kcal+' kcal'});
     return`OK. Objetivos ahora: ${P.kcal} kcal, P${P.p} C${P.c} G${P.f}.`;
