@@ -1,0 +1,6 @@
+.DS_Store
+CLAUDE.md
+.claude/
+*.rtf
+*.key
+.env
