@@ -309,7 +309,7 @@ body.kb #sheet{padding-bottom:16px}
 
 <script>
 'use strict';
-const APP_VERSION='2026.10.04-2';
+const APP_VERSION='2026.10.04-3';
 /* ============ helpers ============ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -824,11 +824,11 @@ function listen(btn,onInterim,onFinal){
   if(document.activeElement)document.activeElement.blur();
   if(!SR){toast('Tu navegador no dicta: usa el micro del teclado de iOS 🎙️');if(tab==='chat')$('#inp').focus();return}
   const r=new SR();rec=r;r.lang='es-ES';r.interimResults=true;r.continuous=false;
-  let txt='';
+  let txt='',done=false;
   btn.classList.add('rec');
-  r.onresult=e=>{txt=[...e.results].map(x=>x[0].transcript).join(' ');onInterim&&onInterim(txt)};
+  r.onresult=e=>{if(done)return;txt=[...e.results].map(x=>x[0].transcript).join(' ');onInterim&&onInterim(txt)};
   r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed')toast('Permite el micrófono en Ajustes de iOS')};
-  r.onend=()=>{btn.classList.remove('rec');rec=null;if(txt.trim())onFinal(txt.trim())};
+  r.onend=()=>{done=true;btn.classList.remove('rec');rec=null;if(txt.trim())onFinal(txt.trim())};
   try{r.start()}catch(e){rec=null;btn.classList.remove('rec')}
 }
 
@@ -1072,13 +1072,13 @@ $('#file').onchange=async e=>{
   }
   e.target.value='';showAttach();
 };
-$('#btn-mic').onclick=()=>listen($('#btn-mic'),t=>{$('#inp').value=t;grow()},t=>sendChat(t));
+$('#btn-mic').onclick=()=>listen($('#btn-mic'),t=>{$('#inp').value=t;grow()},t=>{$('#inp').value='';grow();sendChat(t)});
 $('#btn-send').onclick=()=>sendChat();
 $('#inp').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendChat()}});
 const grow=()=>{const i=$('#inp');i.style.height='auto';i.style.height=Math.min(110,i.scrollHeight)+'px'};
 $('#inp').addEventListener('input',grow);
 async function sendChat(forced){
-  if(busy)return;
+  if(busy){if(forced!==undefined){$('#inp').value='';grow()}return}
   const text=(forced??$('#inp').value).trim(),imgs=pending;
   if(!text&&!imgs.length)return;
   $('#inp').value='';grow();pending=[];showAttach();
