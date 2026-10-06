@@ -125,6 +125,12 @@ h4.sec{margin:18px 0 10px}
 .week div.today{background:var(--green-soft);color:var(--green-d)}
 .week div span{font-size:13px;color:var(--ink)}
 .week .flame{width:22px;height:22px}
+.swrow{display:flex!important;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;margin:14px 0 0;color:var(--ink);font-size:14px;font-weight:800}
+.swrow small{display:block;font-weight:600;color:var(--mute);font-size:11.5px;margin-top:2px}
+.swrow input{width:26px!important;height:26px;flex:none;padding:0;margin:0;accent-color:var(--green)}
+.xmark{display:inline-block;font-size:15px;line-height:1;text-align:center;opacity:.85}
+.cal button .xmark{font-size:18px;margin:2px 0 3px}
+.week .xmark{font-size:15px;height:22px;line-height:22px}
 .nof{width:22px;height:22px;border-radius:50%;border:2px dashed var(--line);display:block}
 .fitrow{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .fitbox{border:1px solid var(--line);border-radius:20px;padding:12px 10px}
@@ -309,7 +315,7 @@ body.kb #sheet{padding-bottom:16px}
 
 <script>
 'use strict';
-const APP_VERSION='2026.10.04-4';
+const APP_VERSION='2026.10.06-1';
 /* ============ helpers ============ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -324,6 +330,7 @@ const DIAS=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'
 const longDate=k=>{const d=pd(k);return DIAS[d.getDay()][0].toUpperCase()+DIAS[d.getDay()].slice(1)+', '+d.getDate()+' de '+MESES[d.getMonth()]+' de '+d.getFullYear()};
 const shortDate=k=>{const d=pd(k);return DIAS[d.getDay()].slice(0,3)+' '+d.getDate()+' '+MESES[d.getMonth()].slice(0,3)};
 const flame=(t,cls='')=>t==='red'?`<svg class="flame ${cls}"><use href="#flame-r"/></svg>`:`<span class="flame bolt ${cls}">⚡</span>`;
+const xmark=(cls='')=>`<span class="xmark ${cls}">❌</span>`;
 const mascot=cls=>`<svg class="${cls}"><use href="#mascot"/></svg>`;
 const TYPES={desayuno:'🥣',comida:'🍽️',merienda:'🍎',cena:'🌙',snack:'🍫'};
 const guessType=()=>{const h=new Date().getHours();return h<11?'desayuno':h<16?'comida':h<19?'merienda':'cena'};
@@ -333,11 +340,11 @@ const KEY='nutri.v1';
 const DEF={
   profile:{name:'',sex:'m',age:30,height:175,weight:75,activity:'1.55',goal:'mantener',deficit:20,surplus:10,configured:false,
     kcal:2500,p:150,c:300,f:68,tdee:2500,minReps:100,stepsRed:20000},
-  meals:[],fit:{},chat:[],settings:{apiKey:'',model:'claude-sonnet-5-5',theme:'light'}
+  meals:[],fit:{},chat:[],inactive:{},settings:{apiKey:'',model:'claude-sonnet-5-5',theme:'light'}
 };
 function load(){
   try{const r=JSON.parse(localStorage.getItem(KEY)||'null');
-    if(r)return{profile:{...DEF.profile,...r.profile},meals:r.meals||[],fit:r.fit||{},chat:r.chat||[],settings:{...DEF.settings,...r.settings}}}catch(e){}
+    if(r)return{profile:{...DEF.profile,...r.profile},meals:r.meals||[],fit:r.fit||{},chat:r.chat||[],inactive:r.inactive||{},settings:{...DEF.settings,...r.settings}}}catch(e){}
   return JSON.parse(JSON.stringify(DEF));
 }
 let S=load();
@@ -388,25 +395,35 @@ function fixRepWorkouts(){
   });
   return n;
 }
+/* día inactivo (descanso / desconectado): no cuenta en medias, rachas ni resúmenes */
+const inact=k=>!!S.inactive[k];
+function setInact(k,v){if(v)S.inactive[k]=1;else delete S.inactive[k]}
+/* un día cuenta para medias si no está marcado inactivo y tiene algún registro (los vacíos no cuentan como 0) */
+function hasData(k){const f=fitDay(k);return totals(k).n>0||f.steps>0||f.push>0||f.squat>0||f.workouts.length>0}
+const counts=k=>!inact(k)&&hasData(k);
 function ensureFit(k){const f=S.fit[k]=S.fit[k]||{};f.steps=f.steps||0;f.push=f.push||0;f.squat=f.squat||0;f.workouts=f.workouts||[];return f}
 /* red = entreno real o muchos pasos · min = 100 flexiones o 100 sentadillas (no cuenta como entreno) */
 function status(k){
+  if(inact(k))return'';
   const P=S.profile,f=fitDay(k);
   if(f.steps>=P.stepsRed||f.workouts.length)return'red';
   if(reps(f)>=P.minReps)return'min';
   return'';
 }
+/* los días inactivos se saltan: ni suman ni rompen la racha */
+const prevAct=k=>{do k=addDays(k,-1);while(inact(k));return k};
 function streak(){
   let k=dk(),n=0;
-  if(!status(k))k=addDays(k,-1);
-  while(status(k)){n++;k=addDays(k,-1)}
+  while(inact(k))k=addDays(k,-1);
+  if(!status(k))k=prevAct(k);
+  while(status(k)){n++;k=prevAct(k)}
   return n;
 }
 function bestStreak(){
   const keys=[...S.meals.map(m=>m.date),...Object.keys(S.fit)].sort();
   if(!keys.length)return 0;
   let k=keys[0],best=0,cur=0;const end=dk();
-  while(k<=end){if(status(k)){cur++;best=Math.max(best,cur)}else cur=0;k=addDays(k,1)}
+  while(k<=end){if(!inact(k)){if(status(k)){cur++;best=Math.max(best,cur)}else cur=0}k=addDays(k,1)}
   return best;
 }
 function frequent(){
@@ -505,7 +522,7 @@ function weekStrip(){
   const L=['L','M','X','J','V','S','D'];
   return`<div class="week">`+L.map((l,i)=>{
     const k=addDays(mon,i),st=status(k);
-    return`<div class="${k===today?'today':''}">${l}<span>${pd(k).getDate()}</span>${st?flame(st==='red'?'red':'o'):'<i class="nof"></i>'}</div>`}).join('')+`</div>`;
+    return`<div class="${k===today?'today':''}">${l}<span>${pd(k).getDate()}</span>${inact(k)?xmark():st?flame(st==='red'?'red':'o'):'<i class="nof"></i>'}</div>`}).join('')+`</div>`;
 }
 function rDia(){
   const k=dk(),P=S.profile,t=totals(k),f=fitDay(k),st=status(k);
@@ -523,7 +540,7 @@ function rDia(){
     <div class="macros">${macroCard('Proteína',t.p,P.p,'p')}${macroCard('Carbs',t.c,P.c,'c')}${macroCard('Grasas',t.f,P.f,'f')}</div>
   </div>
   <div class="card">
-    <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">Fit de hoy</h2>${st?`<span class="tag" style="display:flex;gap:6px;align-items:center;${st==='red'?'background:rgba(255,59,48,.12);color:var(--red)':'background:rgba(255,159,10,.15);color:#d98200'}">${flame(st==='red'?'red':'o')}${st==='red'?'Día fuerte':'Mínimo hecho'}</span>`:''}</div>
+    <div class="row" style="justify-content:space-between;margin-bottom:12px"><h2 style="margin:0">Fit de hoy</h2>${inact(k)?`<span class="tag">${xmark()} Día inactivo</span>`:st?`<span class="tag" style="display:flex;gap:6px;align-items:center;${st==='red'?'background:rgba(255,59,48,.12);color:var(--red)':'background:rgba(255,159,10,.15);color:#d98200'}">${flame(st==='red'?'red':'o')}${st==='red'?'Día fuerte':'Mínimo hecho'}</span>`:''}</div>
     <div class="fitrow"><div class="fitbox"><b>${fmt(f.steps)}</b><span>pasos</span></div><div class="fitbox"><b>${minDone?'✓ ':''}${reps(f)}<small style="font-size:11px;color:var(--mute)">/${P.minReps}</small></b><span>mínimo</span></div><div class="fitbox"><b>${f.workouts.length?f.workouts.length+' 💪':'—'}</b><span>entreno</span></div></div>
     <div style="margin-top:14px"><button class="btn block" id="go-voice">🎙️ Contarle mi día por voz</button></div>
   </div>
@@ -566,6 +583,7 @@ function actSheet(k){
   <p class="help" style="margin-top:-2px">Flexiones + sentadillas suman para el mínimo del día (rayo ⚡); no cuenta como entreno.</p>
   <h4 class="sec" style="margin-top:6px">Entrenos</h4><div id="a-ws"></div>
   <div class="inline"><input type="text" id="a-wt" placeholder="Ej. Pierna, running"><input type="number" inputmode="numeric" id="a-wm" placeholder="min" style="max-width:84px"><button class="btn" id="a-wadd">+</button></div>
+  <label class="swrow"><span>❌ Día inactivo<small>No cuenta en medias, rachas ni resúmenes</small></span><input type="checkbox" id="a-inact" ${inact(k)?'checked':''}></label>
   <button class="btn block" id="a-save" style="margin-top:16px">Guardar</button>`,sh=>{
     drawWs();
     $('#a-ws').onclick=e=>{const b=e.target.closest('[data-del]');if(b){d.workouts=d.workouts.filter(w=>w.id!==b.dataset.del);drawWs()}};
@@ -573,6 +591,7 @@ function actSheet(k){
     $('#a-save').onclick=()=>{
       const before=status(dk());
       Object.assign(ensureFit(k),{steps:Math.round(num($('#a-steps').value)),push:Math.round(num($('#a-push').value)),squat:Math.round(num($('#a-squat').value)),workouts:d.workouts});
+      setInact(k,$('#a-inact').checked);
       save();closeSheet();render();if(k===dk())celebrate(before);
     };
   });
@@ -582,17 +601,20 @@ function actSheet(k){
 let calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),selDay=dk();
 function monthSummary(){
   const days=new Date(calYear,calMonth+1,0).getDate(),today=dk(),P=S.profile;
-  let n=0,sk=0,sp=0,sc=0,sf=0,ss=0,ns=0,fl=0,rd=0,el=0,wk=0;
+  let n=0,sk=0,sp=0,sc=0,sf=0,ss=0,ns=0,fl=0,rd=0,el=0,wk=0,started=0,ix=0;
   for(let d=1;d<=days;d++){
-    const k=dk(new Date(calYear,calMonth,d));if(k>today)break;el++;
+    const k=dk(new Date(calYear,calMonth,d));if(k>today)break;started++;
+    if(inact(k)){ix++;continue}
+    if(!hasData(k))continue;el++;
     const t=totals(k);if(t.n){n++;sk+=t.kcal;sp+=t.p;sc+=t.c;sf+=t.f}
     const f=fitDay(k);if(f.steps){ns++;ss+=f.steps}wk+=f.workouts.length;
     const st=status(k);if(st==='min')fl++;if(st==='red')rd++;
   }
-  if(!el)return`<div class="card"><h2>Resumen de ${MESES[calMonth]}</h2><div class="empty">Este mes aún no ha empezado.</div></div>`;
+  if(!started)return`<div class="card"><h2>Resumen de ${MESES[calMonth]}</h2><div class="empty">Este mes aún no ha empezado.</div></div>`;
+  if(!el)return`<div class="card"><h2>Resumen de ${MESES[calMonth]}</h2><div class="empty">${ix?`Sin días con registros que contar (${ix} ${ix===1?'inactivo':'inactivos'}).`:'Aún no hay registros este mes.'}</div></div>`;
   const a=x=>n?x/n:0,as=ns?ss/ns:0;
   return`<div class="card"><h2>Resumen de ${MESES[calMonth]} · medias</h2>
-  <div class="sub-t">${n} ${n===1?'día':'días'} con comidas · ${wk} ${wk===1?'entreno':'entrenos'}</div>
+  <div class="sub-t">${n} ${n===1?'día':'días'} con comidas · ${wk} ${wk===1?'entreno':'entrenos'}${ix?` · ${ix} ${ix===1?'día inactivo no cuenta':'días inactivos no cuentan'}`:''}</div>
   <div class="rbig">${ring(P.kcal?a(sk)/P.kcal:0,'var(--green)',138,14,rin(fmt(a(sk)),'kcal / día'))}</div>
   <div class="r3">${ring(a(sp)/P.p,'var(--cp)',78,9,rin(fmt(a(sp))+'g'),'Proteína')}${ring(a(sc)/P.c,'var(--cc)',78,9,rin(fmt(a(sc))+'g'),'Carbs')}${ring(a(sf)/P.f,'var(--cf)',78,9,rin(fmt(a(sf))+'g'),'Grasas')}</div>
   <div class="r3">${ring(as/P.stepsRed,'var(--green)',78,9,rin(fmt(as)),'Pasos medios')}${ring(fl/el,'var(--orange)',78,9,rin(fl,'/'+el),'Días con ⚡')}${ring(rd/el,'var(--red)',78,9,rin(rd,'/'+el),'Días con 🔥')}</div></div>`;
@@ -601,18 +623,18 @@ function rHist(){
   const first=new Date(calYear,calMonth,1),offset=(first.getDay()+6)%7,days=new Date(calYear,calMonth+1,0).getDate();
   const today=dk();let cells='';
   for(let i=0;i<offset;i++)cells+='<button class="dim" disabled><span>&nbsp;</span></button>';
-  let red=0,min=0;
+  let red=0,min=0,xs=0;
   for(let d=1;d<=days;d++){
     const k=dk(new Date(calYear,calMonth,d)),st=status(k),f=fitDay(k),has=totals(k).n>0||f.steps>0||f.push>0||f.squat>0;
-    if(st==='red')red++;else if(st)min++;
-    cells+=`<button data-day="${k}" class="${k===selDay?'sel':''} ${k===today?'today':''}"><span>${d}</span>${st?flame(st==='red'?'red':'o'):has?'<i class="dot"></i>':'<i class="sp"></i>'}</button>`;
+    if(inact(k))xs++;else if(st==='red')red++;else if(st)min++;
+    cells+=`<button data-day="${k}" class="${k===selDay?'sel':''} ${k===today?'today':''}"><span>${d}</span>${inact(k)?xmark():st?flame(st==='red'?'red':'o'):has?'<i class="dot"></i>':'<i class="sp"></i>'}</button>`;
   }
   const fr=frequent();
   $('#p-hist').innerHTML=`
   <div class="card">
     <div class="cal-head"><button id="pm">‹</button><b>${MESES[calMonth]} ${calYear}</b><button id="nm">›</button></div>
     <div class="cal">${['L','M','X','J','V','S','D'].map(x=>`<div class="dw">${x}</div>`).join('')}${cells}</div>
-    <div class="legend"><span>${flame('o')} Mínimo: ${S.profile.minReps} repeticiones en el día (${min})</span><span>${flame('red')} Entreno o +${fmt(S.profile.stepsRed/1000)}k pasos (${red})</span></div>
+    <div class="legend"><span>${flame('o')} Mínimo: ${S.profile.minReps} repeticiones en el día (${min})</span><span>${flame('red')} Entreno o +${fmt(S.profile.stepsRed/1000)}k pasos (${red})</span><span>${xmark()} Día inactivo: no cuenta en medias (${xs})</span></div>
   </div>
   <div id="daydetail"></div>
   ${monthSummary()}
@@ -639,12 +661,15 @@ function dayDetail(){
   if(f.push)chips.push(`💪 ${f.push} flexiones`);if(f.squat)chips.push(`🦵 ${f.squat} sentadillas`);
   f.workouts.forEach(w=>chips.push(`🏋️ ${esc(w.text)}${w.min?' · '+w.min+' min':''}`));
   $('#daydetail').innerHTML=`<div class="card">
-    <div class="row" style="justify-content:space-between;margin-bottom:6px"><h2 style="margin:0;text-transform:none;font-size:15px;color:var(--ink)">${longDate(k)}</h2>${st?flame(st==='red'?'red':'o','" style="width:30px;height:30px'):''}</div>
+    <div class="row" style="justify-content:space-between;margin-bottom:6px"><h2 style="margin:0;text-transform:none;font-size:15px;color:var(--ink)">${longDate(k)}</h2>${inact(k)?xmark('" style="font-size:24px'):st?flame(st==='red'?'red':'o','" style="width:30px;height:30px'):''}</div>
+    ${inact(k)?'<div class="sub-t" style="margin-bottom:8px">Día inactivo · no cuenta en medias ni rachas</div>':''}
     ${daySummary(k)}
     ${chips.length?`<div class="actline">${chips.map(c=>`<span>${c}</span>`).join('')}</div>`:''}
     <div style="margin-top:12px">${meals.length?meals.map(mealRow).join(''):'<div class="empty">Sin comidas registradas</div>'}</div>
     <div class="row" style="margin-top:8px"><button class="btn ghost" style="flex:1" id="add-day">+ Comida</button><button class="btn ghost" style="flex:1" id="edit-act">✏️ Actividad</button></div>
+    <div class="row" style="margin-top:8px"><button class="btn ghost" style="flex:1" id="tog-inact">${inact(k)?'✅ Quitar inactivo':'❌ Marcar día inactivo'}</button></div>
   </div>`;
+  $('#tog-inact').onclick=()=>{setInact(k,!inact(k));save();toast(inact(k)?'Día marcado como inactivo':'Día activo otra vez');render()};
   $('#add-day').onclick=()=>mealSheet(null,k);
   $('#edit-act').onclick=()=>actSheet(k);
   $('#daydetail').onclick=e=>{const m=e.target.closest('[data-meal]');if(m)mealSheet(S.meals.find(x=>x.id===m.dataset.meal))};
@@ -656,13 +681,13 @@ function rFit(){
   const k=dk(),f=fitDay(k),P=S.profile,st=status(k);
   let redM=0;const now=new Date();
   for(let d=1;d<=31;d++){const x=new Date(now.getFullYear(),now.getMonth(),d);if(x.getMonth()!==now.getMonth())break;if(status(dk(x))==='red')redM++}
-  let avg=0;for(let i=0;i<7;i++)avg+=fitDay(addDays(k,-i)).steps;avg/=7;
+  let avg=0,an=0;for(let i=0;i<7;i++){const dd=addDays(k,-i);if(counts(dd)){avg+=fitDay(dd).steps;an++}}avg=an?avg/an:0;
   const last=[...Array(7)].map((_,i)=>addDays(k,-i));
   $('#p-fit').innerHTML=`
   <div class="card center">
-    <div style="font-size:54px;line-height:1">${st?flame(st==='red'?'red':'o'):'<span style="opacity:.25">'+flame('o')+'</span>'}</div>
-    <div style="font-weight:900;font-size:18px;margin-top:8px;letter-spacing:-.5px">${st==='red'?'Día fuerte 🔥':st?'Mínimo hecho':'Aún sin fueguito'}</div>
-    <div class="say" style="margin-top:4px">${st==='red'?'Entreno o +'+fmt(P.stepsRed/1000)+'k pasos conseguidos.':st?'Para el fuego rojo: entrena o llega a '+fmt(P.stepsRed)+' pasos.':'Haz '+P.minReps+' repeticiones en el día (flexiones, sentadillas…) para el rayo ⚡.'}</div>
+    <div style="font-size:54px;line-height:1">${inact(k)?xmark('" style="font-size:48px'):st?flame(st==='red'?'red':'o'):'<span style="opacity:.25">'+flame('o')+'</span>'}</div>
+    <div style="font-weight:900;font-size:18px;margin-top:8px;letter-spacing:-.5px">${inact(k)?'Día inactivo':st==='red'?'Día fuerte 🔥':st?'Mínimo hecho':'Aún sin fueguito'}</div>
+    <div class="say" style="margin-top:4px">${inact(k)?'Hoy no cuenta en medias ni rachas. Lo cambias en ✏️ Editar.':st==='red'?'Entreno o +'+fmt(P.stepsRed/1000)+'k pasos conseguidos.':st?'Para el fuego rojo: entrena o llega a '+fmt(P.stepsRed)+' pasos.':'Haz '+P.minReps+' repeticiones en el día (flexiones, sentadillas…) para el rayo ⚡.'}</div>
   </div>
   <div class="card center">
     <h2>Cuéntame qué has hecho</h2>
@@ -681,7 +706,7 @@ function rFit(){
     ${f.workouts.length?f.workouts.map(w=>`<div class="meal" style="cursor:default"><div class="ph">💪</div><div class="t"><b>${esc(w.text)}</b><small>${w.min?w.min+' min':'Entreno'}${w.kcal?' · ~'+w.kcal+' kcal':''}</small></div></div>`).join(''):'<div class="empty">Ningún entreno hoy</div>'}
   </div>
   <div class="card"><h2>Resumen</h2><div class="stat3"><div><b>${streak()}</b><span>racha 🔥</span></div><div><b>${redM}</b><span>días rojos mes</span></div><div><b>${fmt(avg)}</b><span>pasos medios 7d</span></div></div></div>
-  <div class="card"><h2>Últimos 7 días · toca para editar</h2>${last.map(x=>{const ff=fitDay(x),s=status(x);return`<div class="meal" data-edit="${x}"><div class="ph" style="background:none">${s?flame(s==='red'?'red':'o'):'<i class="nof"></i>'}</div><div class="t"><b>${shortDate(x)}</b><small>${[ff.push?ff.push+' flex.':'',ff.squat?ff.squat+' sent.':'',...ff.workouts.map(w=>esc(w.text))].filter(Boolean).join(' · ')||'Sin actividad'}</small></div><div class="k">${fmt(ff.steps)}<small>pasos</small></div></div>`}).join('')}</div>`;
+  <div class="card"><h2>Últimos 7 días · toca para editar</h2>${last.map(x=>{const ff=fitDay(x),s=status(x);return`<div class="meal" data-edit="${x}"><div class="ph" style="background:none">${inact(x)?xmark():s?flame(s==='red'?'red':'o'):'<i class="nof"></i>'}</div><div class="t"><b>${shortDate(x)}</b><small>${[ff.push?ff.push+' flex.':'',ff.squat?ff.squat+' sent.':'',...ff.workouts.map(w=>esc(w.text))].filter(Boolean).join(' · ')||'Sin actividad'}${inact(x)?' · inactivo':''}</small></div><div class="k">${fmt(ff.steps)}<small>pasos</small></div></div>`}).join('')}</div>`;
   $('#fit-mic').onclick=()=>listen($('#fit-mic'),txt=>{$('#fit-say').textContent='“'+txt+'”'},txt=>fitSubmit(txt));
   $('#fit-go').onclick=()=>{const v=$('#fit-txt').value.trim();if(v){$('#fit-txt').blur();fitSubmit(v)}};
   $('#fit-txt').onkeydown=e=>{if(e.key==='Enter')$('#fit-go').click()};
@@ -727,12 +752,13 @@ function celebrate(before){
 function openStreak(){
   const k=dk(),st=status(k),f=fitDay(k),P=S.profile,s=streak(),best=bestStreak();
   let ttl,sub;
-  if(st==='red'){ttl='Día fuerte conseguido 🔥';sub='Hoy tienes el fuego rojo. ¡Máquina!'}
+  if(inact(k)){ttl='Hoy es día inactivo ❌';sub='No cuenta en medias ni rompe tu racha. Puedes quitarlo en ✏️ Actividad.'}
+  else if(st==='red'){ttl='Día fuerte conseguido 🔥';sub='Hoy tienes el fuego rojo. ¡Máquina!'}
   else if(st==='min'){ttl='Mínimo hecho ⚡';sub=`Tienes el rayo ⚡. Entrena o llega a ${fmt(P.stepsRed)} pasos para el rojo (llevas ${fmt(f.steps)}).`}
   else{ttl='Hoy aún no hay fuego';sub=`Te falta el mínimo: ${P.minReps} repeticiones en el día. Llevas ${reps(f)} (${f.push} flexiones y ${f.squat} sentadillas).`}
   let mf=0,mr=0;const now=new Date();
   for(let d=1;d<=31;d++){const x=new Date(now.getFullYear(),now.getMonth(),d);if(x.getMonth()!==now.getMonth())break;const q=status(dk(x));if(q)mf++;if(q==='red')mr++}
-  const strip=[...Array(14)].map((_,i)=>{const x=addDays(k,i-13),q=status(x);return`<div style="display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;font-weight:800;color:var(--mute)">${q?flame(q==='red'?'red':'o','" style="width:22px;height:22px'):'<i class="nof"></i>'}${pd(x).getDate()}</div>`}).join('');
+  const strip=[...Array(14)].map((_,i)=>{const x=addDays(k,i-13),q=status(x);return`<div style="display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;font-weight:800;color:var(--mute)">${inact(x)?xmark('" style="font-size:14px;height:22px;line-height:22px'):q?flame(q==='red'?'red':'o','" style="width:22px;height:22px'):'<i class="nof"></i>'}${pd(x).getDate()}</div>`}).join('');
   openSheet(`<div class="streakbig">${flame(st==='red'?'red':'o')}<b>${s}</b><span>${s?(s===1?'día':'días')+' seguidos cumpliendo ⚡/🔥'+(!st?' · sigue viva si cumples hoy':''):'Sin racha ahora mismo. ¡Empieza hoy!'}</span></div>
   <div class="fire-msg"><b>${ttl}</b>${sub}</div>
   <div class="stat3"><div><b>${best}</b><span>mejor racha</span></div><div><b>${mf}</b><span>días ⚡/🔥 este mes</span></div><div><b>${mr}</b><span>días 🔥 este mes</span></div></div>
@@ -842,7 +868,8 @@ const TOOLS=[
   {name:'clear_day',description:'Vacía un día: borra sus comidas, su actividad (pasos, flexiones, sentadillas, entrenos) o todo.',input_schema:{type:'object',properties:{date:{type:'string',description:'YYYY-MM-DD. Por defecto hoy.'},what:{type:'string',enum:['meals','activity','all']}},required:['what']}},
   {name:'update_profile',description:'Cambia el perfil, objetivos y ajustes del usuario. Los objetivos de kcal y macros se recalculan solos. Solo los campos que cambian.',input_schema:{type:'object',properties:{name:{type:'string'},sex:{type:'string',enum:['m','f']},age:{type:'number'},height_cm:{type:'number'},weight_kg:{type:'number'},activity_factor:{type:'number',description:'1.2 sedentario, 1.375 ligera, 1.55 moderada, 1.725 alta, 1.9 muy alta'},goal:{type:'string',enum:['perder','mantener','ganar']},deficit_pct:{type:'number',description:'5-35, % de déficit si perder'},surplus_pct:{type:'number',description:'3-25, % de superávit si ganar'},min_reps:{type:'number',description:'repeticiones mínimas al día para el ⚡'},steps_fire:{type:'number',description:'pasos para el 🔥'},theme:{type:'string',enum:['light','dark']}}}},
   {name:'delete_workout',description:'Elimina un entreno registrado por su id (por ejemplo si flexiones, sentadillas o pasos se registraron mal como entreno). Los ids están en el contexto.',input_schema:{type:'object',properties:{id:{type:'string'}},required:['id']}},
-  {name:'delete_meal',description:'Elimina una comida registrada por su id.',input_schema:{type:'object',properties:{id:{type:'string'}},required:['id']}}
+  {name:'delete_meal',description:'Elimina una comida registrada por su id.',input_schema:{type:'object',properties:{id:{type:'string'}},required:['id']}},
+  {name:'set_inactive',description:'Marca o desmarca días como INACTIVOS (descanso, evento, desconectado de la rutina). Un día inactivo se ve con ❌ y NO cuenta en medias, rachas ni resúmenes. Úsala cuando diga "hoy/ayer/el 3 lo marco inactivo", "quita el inactivo del 3", etc. Acepta varias fechas a la vez.',input_schema:{type:'object',properties:{dates:{type:'array',items:{type:'string'},description:'Fechas YYYY-MM-DD (resuelve hoy, ayer, anteayer, "el 3"…)'},inactive:{type:'boolean',description:'true = marcar inactivo; false = quitar el inactivo'}},required:['dates','inactive']}}
 ];
 function sysPrompt(){
   const P=S.profile,k=dk(),t=totals(k),f=fitDay(k),now=new Date();
@@ -860,6 +887,7 @@ REGLAS:
 - Puedes modificar CUALQUIER dato de la app con tus herramientas: editar comidas (update_meal, también para moverlas de día), borrarlas (delete_meal), editar o borrar entrenos (update_workout, delete_workout), poner pasos/flexiones/sentadillas de cualquier día (log_activity, con 0 para quitarlos), vaciar un día (clear_day), cambiar perfil, objetivos y ajustes (update_profile) y consultar cualquier fecha (get_day, úsala si necesitas ids de días anteriores a los últimos 14). Cuando pida un cambio, HAZLO con la herramienta; nunca digas que no puedes ni le pidas que lo haga a mano. Todo lo que hagas tiene botón Deshacer.
 - Las flexiones y sentadillas NUNCA son un entreno (workout): solo cuentan como mínimo del día.
 - Si habla de ayer u otro día, usa el parámetro date (ayer = ${addDays(k,-1)}).
+- Días INACTIVOS (descanso/evento/desconectado): con set_inactive puedes marcar o quitar el ❌ de cualquier fecha (varias a la vez). Un día inactivo no cuenta en medias ni rachas. Solo marca un día inactivo cuando él lo pida; nunca por tu cuenta.
 - Si pide borrar o corregir, usa delete_meal (y log_meals con el dato correcto).
 - Si solo pregunta (resúmenes, qué cenar, balance), responde con los datos de abajo sin registrar nada.
 - Tras registrar, confirma en una frase y di cuánto le queda del día (kcal/proteína).
@@ -870,6 +898,7 @@ Objetivos diarios: ${P.kcal} kcal, ${P.p} g proteína, ${P.c} g carbs, ${P.f} g 
 Perfil: nombre ${P.name||'—'}, sexo ${P.sex}, edad ${P.age}, altura ${P.height} cm, peso ${P.weight} kg, actividad ${P.activity}, objetivo ${P.goal} (déficit ${P.deficit}% / superávit ${P.surplus}%), mínimo ${P.minReps} repeticiones, fuego a ${P.stepsRed} pasos, tema ${S.settings.theme}.
 Hoy hasta ahora: ${Math.round(t.kcal)} kcal, P${Math.round(t.p)} C${Math.round(t.c)} G${Math.round(t.f)} · pasos ${f.steps} · flexiones ${f.push} · sentadillas ${f.squat} · entrenos: ${f.workouts.map(w=>`[id:${w.id}] ${w.text}`).join(', ')||'ninguno'}
 Comidas de hoy:\n${meals}
+Días inactivos marcados: ${Object.keys(S.inactive).sort().slice(-20).join(', ')||'ninguno'}
 Habituales: ${fr||'—'}
 Últimos días:\n${hist||'(sin historial)'}`;
 }
@@ -900,6 +929,7 @@ function applyUndo(list){
     else if(u.t==='fit'){if(u.prev)S.fit[u.k]=u.prev;else delete S.fit[u.k]}
     else if(u.t==='meal_edit'){const i2=S.meals.findIndex(m=>m.id===u.id);if(i2>=0)S.meals[i2]=u.prev;else S.meals.push(u.prev)}
     else if(u.t==='restore_many'){u.meals.forEach(m=>{if(!S.meals.some(x=>x.id===m.id))S.meals.push(m)})}
+    else if(u.t==='inact'){setInact(u.k,u.prev)}
     else if(u.t==='profile'){S.profile=u.prev;S.settings.theme=u.theme||'light';applyTheme();recalc()}
   }
 }
@@ -928,7 +958,7 @@ function runTool(name,inp,cards){
   }
   if(name==='get_day'){
     const t=totals(k),f=fitDay(k);
-    return `Día ${k}: ${Math.round(t.kcal)} kcal P${Math.round(t.p)} C${Math.round(t.c)} G${Math.round(t.f)} · pasos ${f.steps} · flexiones ${f.push} · sentadillas ${f.squat} · estado ${status(k)||'sin ⚡ ni 🔥'}\nComidas: ${S.meals.filter(m=>m.date===k).map(m=>`[id:${m.id}] ${m.type} ${m.name} ${m.kcal}kcal P${m.p} C${m.c} G${m.f}`).join(' | ')||'ninguna'}\nEntrenos: ${f.workouts.map(w=>`[id:${w.id}] ${w.text} ${w.min||0}min`).join(' | ')||'ninguno'}`;
+    return `Día ${k}: ${Math.round(t.kcal)} kcal P${Math.round(t.p)} C${Math.round(t.c)} G${Math.round(t.f)} · pasos ${f.steps} · flexiones ${f.push} · sentadillas ${f.squat} · estado ${inact(k)?'INACTIVO ❌ (no cuenta)':status(k)||'sin ⚡ ni 🔥'}\nComidas: ${S.meals.filter(m=>m.date===k).map(m=>`[id:${m.id}] ${m.type} ${m.name} ${m.kcal}kcal P${m.p} C${m.c} G${m.f}`).join(' | ')||'ninguna'}\nEntrenos: ${f.workouts.map(w=>`[id:${w.id}] ${w.text} ${w.min||0}min`).join(' | ')||'ninguno'}`;
   }
   if(name==='update_meal'){
     const m=S.meals.find(x=>x.id===inp.id);if(!m)return'No encontrada';
@@ -982,6 +1012,13 @@ function runTool(name,inp,cards){
     return`OK eliminado. Estado de ${kk}: ${status(kk)||'sin ⚡ ni 🔥'}.`;
   }
   if(name==='delete_meal'){const old=S.meals.find(m=>m.id===inp.id);if(old)curUndo.push({t:'restore',meal:old});const n=S.meals.length;S.meals=S.meals.filter(m=>m.id!==inp.id);return n>S.meals.length?'OK eliminada':'No encontrada'}
+  if(name==='set_inactive'){
+    const ds=[...new Set((inp.dates||[]).filter(d=>/^\d{4}-\d{2}-\d{2}$/.test(d)))].slice(0,60),v=inp.inactive!==false;
+    if(!ds.length)return'Sin fechas válidas';
+    ds.forEach(d=>{curUndo.push({t:'inact',k:d,prev:inact(d)});setInact(d,v)});
+    cards.push({kind:'min',t:(v?'❌ Inactivo: ':'✅ Activo otra vez: ')+ds.map(shortDate).join(', ')});
+    return`OK. ${v?'Marcados inactivos':'Quitado el inactivo de'}: ${ds.join(', ')}. No cuentan en medias mientras estén inactivos.`;
+  }
   return'Herramienta desconocida';
 }
 async function converse(text,imgs){
